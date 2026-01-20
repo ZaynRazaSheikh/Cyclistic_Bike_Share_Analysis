@@ -1,148 +1,163 @@
-Step by Step Procedure
+# =========================================================
+# Project: Cyclistic Bike Share Analysis
+# Author: Muhammad Zain Raza
+# Location: Germany
+#
+# Description:
+# This project analyzes bike-sharing usage patterns
+# between casual riders and annual members using
+# Divvy bike trip data (Q1 2019 and Q1 2020).
+#
+# Business Question:
+# How do casual riders and annual members use
+# Cyclistic bikes differently?
+#
+# Tools:
+# R, tidyverse, dplyr, ggplot2, lubridate
+# =========================================================
 
-library(tidyverse)  # This library is used to wrangle data efficiently.
-library(conflicted)  # Conflicted package is utilized to manage conflicts between function names.
 
-# Set dplyr::filter and dplyr::lag as the default choices to handle potential conflicts.
+# =====================
+# LOAD LIBRARIES
+# =====================
+library(tidyverse)
+library(conflicted)
+library(lubridate)
+
 conflict_prefer("filter", "dplyr")
 conflict_prefer("lag", "dplyr")
 
-#=====================
+
+# =====================
 # STEP 1: COLLECT DATA
-#=====================
-# Reading and storing Divvy datasets (csv files) for the first quarters of 2019 and 2020.
+# =====================
 q1_2019 <- read_csv("Divvy_Trips_2019_Q1.csv")
 q1_2020 <- read_csv("Divvy_Trips_2020_Q1.csv")
 
-#====================================================
-# STEP 2: WRANGLE DATA AND COMBINE INTO A SINGLE FILE
-#====================================================
-# Comparing column names of each dataset and ensuring they match perfectly before combining them.
-colnames(q1_2019)
-colnames(q1_2020)
 
-# Renaming columns of q1_2019 to match the structure of q1_2020 for consistency.
-(q1_2019 <- rename(q1_2019
-                   ,ride_id = trip_id
-                   ,rideable_type = bikeid
-                   ,started_at = start_time
-                   ,ended_at = end_time
-                   ,start_station_name = from_station_name
-                   ,start_station_id = from_station_id
-                   ,end_station_name = to_station_name
-                   ,end_station_id = to_station_id
-                   ,member_casual = usertype
-))
+# =========================================
+# STEP 2: WRANGLE & COMBINE DATA
+# =========================================
 
-# Inspecting the structure of the dataframes for any inconsistencies.
-str(q1_2019)
-str(q1_2020)
+q1_2019 <- q1_2019 %>%
+  rename(
+    ride_id = trip_id,
+    rideable_type = bikeid,
+    started_at = start_time,
+    ended_at = end_time,
+    start_station_name = from_station_name,
+    start_station_id = from_station_id,
+    end_station_name = to_station_name,
+    end_station_id = to_station_id,
+    member_casual = usertype
+  ) %>%
+  mutate(
+    ride_id = as.character(ride_id),
+    rideable_type = as.character(rideable_type)
+  )
 
-# Converting ride_id and rideable_type columns to character to stack them correctly.
-q1_2019 <-  mutate(q1_2019, ride_id = as.character(ride_id)
-                   ,rideable_type = as.character(rideable_type)) 
+all_trips <- bind_rows(q1_2019, q1_2020) %>%
+  select(
+    -start_lat, -start_lng,
+    -end_lat, -end_lng,
+    -birthyear, -gender,
+    -tripduration
+  )
 
-# Combining individual quarter dataframes into a single dataframe.
-all_trips <- bind_rows(q1_2019, q1_2020)
 
-# Removing unnecessary columns such as latitude, longitude, birth year, and gender for consistency.
-all_trips <- all_trips %>%  
-  select(-c(start_lat, start_lng, end_lat, end_lng, birthyear, gender,  "tripduration"))
+# =========================================
+# STEP 3: CLEAN & PREPARE DATA
+# =========================================
 
-#======================================================
-# STEP 3: CLEAN UP AND ADD DATA TO PREPARE FOR ANALYSIS
-#======================================================
-# Reviewing the structure and summary of the combined dataframe.
-colnames(all_trips)  #List of column names
-nrow(all_trips)  #Number of rows
-dim(all_trips)  #Dimensions
-head(all_trips)  #First 6 rows
-str(all_trips)  #Structure
-summary(all_trips)  #Statistical summary
+all_trips <- all_trips %>%
+  mutate(
+    member_casual = recode(
+      member_casual,
+      "Subscriber" = "member",
+      "Customer" = "casual"
+    ),
+    date = as.Date(started_at),
+    month = month(date),
+    day = day(date),
+    year = year(date),
+    day_of_week = wday(date, label = TRUE),
+    ride_length = as.numeric(difftime(ended_at, started_at))
+  )
 
-# Replacing different labels for member and casual riders with the current 2020 labels.
-table(all_trips$member_casual)
-all_trips <-  all_trips %>% 
-  mutate(member_casual = recode(member_casual
-                                ,"Subscriber" = "member"
-                                ,"Customer" = "casual"))
+all_trips_v2 <- all_trips %>%
+  filter(
+    start_station_name != "HQ QR",
+    ride_length > 0
+  )
 
-# Adding columns for date, month, day, year, and day of the week for further analysis.
-all_trips$date <- as.Date(all_trips$started_at)
-all_trips$month <- format(as.Date(all_trips$date), "%m")
-all_trips$day <- format(as.Date(all_trips$date), "%d")
-all_trips$year <- format(as.Date(all_trips$date), "%Y")
-all_trips$day_of_week <- format(as.Date(all_trips$date), "%A")
 
-# Adding a calculated field for ride length in seconds.
-all_trips$ride_length <- difftime(all_trips$ended_at, all_trips$started_at)
+# =========================================
+# STEP 4: DESCRIPTIVE ANALYSIS
+# =========================================
 
-# Converting ride_length from factor to numeric for calculations.
-all_trips$ride_length <- as.numeric(as.character(all_trips$ride_length))
-
-# Removing "bad" data such as rides with negative trip duration or bikes taken out for quality control.
-all_trips_v2 <- all_trips[!(all_trips$start_station_name == "HQ QR" | all_trips$ride_length < 0),]
-
-#=====================================
-# STEP 4: CONDUCT DESCRIPTIVE ANALYSIS
-#=====================================
-# Calculating descriptive statistics for ride length.
-mean(all_trips_v2$ride_length)  # Average ride length
-median(all_trips_v2$ride_length)  # Median ride length
-max(all_trips_v2$ride_length)  # Longest ride length
-min(all_trips_v2$ride_length)  # Shortest ride length
-
-# Using summary() to display summary statistics for ride length.
 summary(all_trips_v2$ride_length)
 
-# Comparing ride lengths between member and casual users.
-aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = mean)
-aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = median)
-aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = max)
-aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = min)
+ride_stats <- all_trips_v2 %>%
+  group_by(member_casual) %>%
+  summarise(
+    mean_ride_length = mean(ride_length),
+    median_ride_length = median(ride_length),
+    max_ride_length = max(ride_length),
+    min_ride_length = min(ride_length),
+    .groups = "drop"
+  )
 
-# Analyzing average ride time by each day for members vs casual users.
-aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual + all_trips_v2$day_of_week, FUN = mean)
+ride_stats
 
-# Fixing the order of days of the week.
-all_trips_v2$day_of_week <- ordered(all_trips_v2$day_of_week, levels=c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"))
 
-# Re-running the analysis for average ride time by each day for members vs casual users.
-aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual + all_trips_v2$day_of_week, FUN = mean)
+# =========================================
+# STEP 5: WEEKDAY USAGE ANALYSIS
+# =========================================
 
-# Analyzing ridership data by user type and weekday.
-all_trips_v2 %>% 
-  mutate(weekday = wday(started_at, label = TRUE)) %>%  
-  group_by(member_casual, weekday) %>%  
-  summarise(number_of_rides = n()							
-            ,average_duration = mean(ride_length)) %>% 		
-  arrange(member_casual, weekday)								
+weekday_summary <- all_trips_v2 %>%
+  group_by(member_casual, day_of_week) %>%
+  summarise(
+    number_of_rides = n(),
+    average_duration = mean(ride_length),
+    .groups = "drop"
+  )
 
-# Visualizing the number of rides by rider type.
-all_trips_v2 %>% 
-  mutate(weekday = wday(started_at, label = TRUE)) %>% 
-  group_by(member_casual, weekday) %>% 
-  summarise(number_of_rides = n()
-            ,average_duration = mean(ride_length)) %>% 
-  arrange(member_casual, weekday)  %>% 
-  ggplot(aes(x = weekday, y = number_of_rides, fill = member_casual)) +
-  geom_col(position = "dodge")
+weekday_summary
 
-# Creating a visualization for average duration.
-all_trips_v2 %>% 
-  mutate(weekday = wday(started_at, label = TRUE)) %>% 
-  group_by(member_casual, weekday) %>% 
-  summarise(number_of_rides = n()
-            ,average_duration = mean(ride_length)) %>% 
-  arrange(member_casual, weekday)  %>% 
-  ggplot(aes(x = weekday, y = average_duration, fill = member_casual)) +
-  geom_col(position = "dodge")
 
-#=================================================
-# STEP 5: EXPORT SUMMARY FILE FOR FURTHER ANALYSIS
-#=================================================
-# Exporting summary data to a CSV file for further analysis in Excel, Tableau, or other software.
-# Note: Adjust the file location according to your system (e.g., "F:\\R_p1\\summary_data.csv").
-counts <- aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual + all_trips_v2$day_of_week, FUN = mean)
-write.csv(counts, "F:\\R_p1\\summary_data.csv", row.names = FALSE)
+# =========================================
+# STEP 6: VISUALIZATION
+# =========================================
 
+ggplot(weekday_summary,
+       aes(x = day_of_week,
+           y = number_of_rides,
+           fill = member_casual)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Number of Rides by User Type and Weekday",
+    x = "Day of Week",
+    y = "Number of Rides"
+  )
+
+ggplot(weekday_summary,
+       aes(x = day_of_week,
+           y = average_duration,
+           fill = member_casual)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Average Ride Duration by User Type and Weekday",
+    x = "Day of Week",
+    y = "Average Ride Duration (seconds)"
+  )
+
+
+# =========================================
+# STEP 7: EXPORT SUMMARY
+# =========================================
+
+write_csv(weekday_summary, "summary_data.csv")
+
+# =====================
+# END OF SCRIPT
+# =====================
